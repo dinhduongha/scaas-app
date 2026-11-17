@@ -14,7 +14,7 @@ repository, `docs/decisions.md`.
 
 **`[= ua-rs-native]`** marks a value that must equal the one in the SCaaS-side spec for `ua-rs` as a native backend
 (`docs/superpowers/specs/2026-11-17-ua-rs-native.md` in the SCaaS repository, branch `ua-rs-native`, itself SPECIFIED).
-This text was compared with that spec on 2026-11-17; what was aligned is listed in [section 9.1](#91-comparison-of-2026-11-17).
+This text was compared with that spec at its commit `87a9608ea` (2026-11-17); what was aligned is listed in [section 9.1](#91-comparison-of-2026-11-17).
 
 ## 1. Scope — SPECIFIED
 
@@ -114,8 +114,8 @@ One table. Every backend reads it; no backend uses a default path of its own. `i
 |---|---|---|---|---|
 | `evm` | secp256k1, BIP-32 | `m/44'/60'/0'/0/i` | nothing | last 20 bytes of keccak256 of the public key, EIP-55 |
 | `hedera` | secp256k1, BIP-32 | `m/44'/3030'/0'/0/i` | nothing | the EVM alias, as `evm`. No `0.0.N` id is derived |
-| `bitcoin` | secp256k1, BIP-32 | BIP-84: `m/84'/0'/0'/0/i` | coin type `1'` | P2WPKH bech32, `bc1q…` / `tb1q…` |
-| `bitcoin`, Taproot (optional account type) | secp256k1, BIP-32 | BIP-86: `m/86'/0'/0'/0/i` | coin type `1'` | P2TR bech32m, `bc1p…` / `tb1p…`, the BIP-341 key tweak with no script path |
+| `bitcoin` | secp256k1, BIP-32 | BIP-84: `m/84'/0'/0'/k/i`, `k` = 0 receive, 1 change | coin type `1'` (testnet, signet, regtest) | P2WPKH bech32, `bc1q…` / `tb1q…`; regtest `bcrt1q…` (section 3.2) |
+| `bitcoin`, Taproot (optional account type) | secp256k1, BIP-32 | BIP-86: `m/86'/0'/0'/k/i`, `k` = 0 receive, 1 change | coin type `1'` | P2TR bech32m, `bc1p…` / `tb1p…`, the BIP-341 key tweak with no script path; regtest `bcrt1p…` (section 3.2) |
 | `cosmos` | secp256k1, BIP-32 | `m/44'/118'/0'/0/i` | nothing | bech32 `cosmos`, RIPEMD-160 of SHA-256 of the compressed key |
 | `solana` | ed25519, SLIP-10 | `m/44'/501'/i'/0'` | nothing | base58 of the public key |
 | `stellar` | ed25519, SLIP-10 | `m/44'/148'/i'` | nothing | `G…` strkey |
@@ -123,7 +123,7 @@ One table. Every backend reads it; no backend uses a default path of its own. `i
 | `sui` | ed25519, SLIP-10 | `m/44'/784'/i'/0'/0'` | nothing | `0x` + BLAKE2b-256 of `0x00 ‖ public key` |
 | `aptos` | ed25519, SLIP-10 | `m/44'/637'/i'/0'/0'` | nothing | `0x` + SHA3-256 of `public key ‖ 0x00` |
 | `gram` | ed25519, SLIP-10 | `m/44'/607'/i'` | the testnet flag of the address and the wallet's network id | the address of a W5R1 wallet contract for that public key, workchain 0; never the bare public key |
-| `polkadot` | sr25519 | no path: see 3.1 | SS58 prefix | SS58, prefix 0 on mainnet, 42 on testnet |
+| `polkadot` | sr25519 | no path: see 3.1 | the SS58 prefix of the chain, nothing else | SS58 with the **chain's** prefix (section 3.1, step 7) |
 
 The secp256k1 and ed25519 rows for the families SCaaS has are the forms of the SCaaS repository,
 `docs/clients/signers-clientkeys.md` section 9.
@@ -138,18 +138,39 @@ polkadot.js.
    sentence: this is not the BIP-39 seed. The passphrase is **not** NFKD-normalised here, as `substrate-bip39` and
    polkadot.js take it.
 2. Expand the mini-secret to an sr25519 key pair (the Ed25519 expansion mode).
-3. **No junction** by default: the key of step 2 is the account. Mainnet and testnet use the same key and differ only
-   in the SS58 prefix.
+3. **No junction** by default: the key of step 2 is the account. Every Substrate chain uses the same key; only the
+   SS58 prefix of the address differs.
 4. An account may carry an optional junction path (`//polkadot`, `//paseo`, …) as a per-account setting, applied to the
    key of step 2. Grammar, chain codes and bounds are exactly those of `ua-rs-native` section 7.3: `//` hard and `/`
    soft junctions of 1 to 64 printable ASCII bytes; a digit-only junction is its `u64` little-endian, any other the
    SCALE string; an encoding of at most 32 bytes zero-padded, a longer one replaced by its BLAKE2b-256; at most 16
    junctions and 512 bytes. Refused with `JunctionInvalid`: a `///` password part, an empty junction, one starting
-   with `0x` or `+`, a digit-only one outside `u64`. A path is public account data, never a constant in a core, never
+   with `0x` or `+`, a digit-only one outside `u64`, a digit-only one with a leading zero (`//007`; `//0` itself is
+   accepted, and `//7` is the one spelling of that key). A path is public account data, never a constant in a core, never
    a password. A soft-derived key's signatures are not reproducible across tools: verify only.
 5. Index: `derive("polkadot", 0)` is the bare account. Any other index without a junction is `IndexUnsupported`;
    further accounts are made with a junction.
 6. Signing context: `substrate`.
+7. **The SS58 prefix belongs to a chain, not to an environment.** The core's chain table carries one prefix per
+   Substrate chain it names:
+
+   | Chain | SS58 prefix |
+   |---|---|
+   | Polkadot | 0 |
+   | generic Substrate (Westend among others) | 42 |
+   | Paseo | **pending**: task T0 of the `ua-rs-native` plan reads it from Paseo's chain spec and reports it; no value is assumed here |
+
+   The app's `testnet` environment for `polkadot` is Paseo, so its testnet address cannot be pinned until that value
+   is in. A prefix outside 0 to 16,383, or 46 or 47, is refused.
+
+### 3.2 Bitcoin
+
+- **Two chains per account type:** receive `…/0/i` and change `…/1/i`, for BIP-84 and for BIP-86. An account record and
+  every `derive` / `sign` call on `bitcoin` carry `change`, 0 or 1; any other value is `IndexUnsupported`. A change
+  output of a transaction goes to a `change = 1` address of the same account.
+- **Addresses:** `bc` for coin type 0, `tb` for coin type 1. A regtest address (`bcrt…`) is not produced by a backend's
+  address call: the app encodes it from the key's witness program, `(0, HASH160(public key))` or `(1, x(output key))`,
+  with the hrp `bcrt` and the same bech32 / bech32m rule. With `ua-rs` as the backend that is its `witness_program()`.
 
 ## 4. Chain-to-backend table — SPECIFIED
 
@@ -191,13 +212,20 @@ One interface for the three backends, the same in both cores.
 |---|---|---|
 | `unlock` | seed id, mnemonic, BIP-39 passphrase | nothing; the backend holds what it needs until `lock` |
 | `lock` | — | nothing; the backend wipes what it holds |
-| `derive` | chain, environment, seed id, index, optional junction (`polkadot` only) | public key, address |
+| `derive` | chain, environment, seed id, index, optional junction (`polkadot` only), `change` 0 or 1 (`bitcoin` only) | public key, address; for `bitcoin` also the witness program |
 | `sign` | chain, environment, seed id, index, optional junction, unsigned transaction | signed transaction bytes, transaction id |
+
+A `bitcoin` unsigned transaction names, per input, the `change` and index of the key that signs it.
 
 - `derive` and `sign` do no network I/O. Everything a transaction needs from a node (nonce, fee, block hash, gas
   objects, expiry) is a field of the unsigned transaction, filled by the caller. A backend never invents such a value.
 - Signature rules, `[= ua-rs-native]`: ECDSA is RFC 6979 with no extra entropy, low-S, **no low-R grinding**; Ed25519 is
   RFC 8032; sr25519 is randomized.
+- **No off-chain message through the transaction path.** A user's "sign this text" is signed only inside the chain's
+  own envelope, built in this process (a NEP-413 payload, a Substrate `<Bytes>…</Bytes>` wrapping, a Solana off-chain
+  message header, an Aptos `APTOS\n…` full message), never as raw user bytes; this version of the interface has no
+  such call at all. With `ua-rs` as the backend the raw-message path refuses a message that starts with
+  `0xff ‖ "solana offchain"` or `"APTOS\n"`; a transaction preimage never starts so.
 - `sign` checks every field before it signs; a missing, extra or malformed field is `TxField`, a bad address
   `AddressInvalid`, a bad amount `AmountInvalid`.
 
@@ -209,7 +237,7 @@ floating point anywhere. One object is one native transfer unless a row says mor
 | Chain | Fields | Signed output |
 |---|---|---|
 | `evm`, `hedera` | `chainId`, `nonce`, `to`, `value`, `data`, `gasLimit`, `maxFeePerGas`, `maxPriorityFeePerGas` | an EIP-1559 (type 2) transaction, RLP. Type 4 (EIP-7702) has no shape here: `TxTypeRefused` |
-| `bitcoin` | `inputs` `[{txid, vout, value, scriptPubKey}]`, `outputs` `[{address, value}]` (change is an explicit output), `locktime`, `sequence` | a segwit transaction, `SIGHASH_ALL` (BIP-143); Taproot inputs `SIGHASH_DEFAULT` (BIP-341) |
+| `bitcoin` | `inputs` `[{txid, vout, value, scriptPubKey, change, index}]`, `outputs` `[{address, value}]` (the change output is explicit, to a `change = 1` address), `locktime`, `sequence` | a segwit transaction, `SIGHASH_ALL` (BIP-143); Taproot inputs `SIGHASH_DEFAULT` (BIP-341) |
 | `cosmos` | `chainId`, `accountNumber`, `sequence`, `fee` `{amount, denom, gas}`, `memo`, `from`, `to`, `amount`, `denom` | `TxRaw`, `SIGN_MODE_DIRECT`, one `MsgSend` |
 | `solana` | `recentBlockhash`, `from`, `to`, `lamports` | a legacy transaction: one signature and the message, one System transfer |
 | `stellar` | `networkPassphrase`, `source`, `sequence`, `fee`, `timeBounds` `{min, max}`, `destination`, `amount`, `createAccount` (bool) | a v1 `TransactionEnvelope`, XDR |
@@ -254,7 +282,7 @@ Numbers are appended, never reused.
 | 8 | `ChainUnknown` | a chain id outside section 1 |
 | 9 | `EnvUnknown` | not `mainnet` or `testnet` |
 | 10 | `IndexUnsupported` | an index the chain's row does not allow |
-| 11 | `JunctionInvalid` | a junction on another chain, a soft junction, a password suffix |
+| 11 | `JunctionInvalid` | a junction on another chain, or a path outside section 3.1's grammar (a password part, an empty junction, a leading `0x` or `+`, a digit-only junction outside `u64` or with a leading zero) |
 | 12 | `BackendUnavailable` | the table's backend for this chain cannot run here |
 | 13 | `TxField` | a missing, extra or malformed field of an unsigned transaction |
 | 14 | `TxTypeRefused` | a transaction type this contract has no shape for |
@@ -321,8 +349,8 @@ For `ua-rs` to be backend (c) of a chain, these must be byte-equal between this 
 
 ### 9.1 Comparison of 2026-11-17
 
-Compared with `ua-rs-native` as it stood that day (SPECIFIED on its side too; it may still move, and then this section
-is redone).
+Compared with `ua-rs-native` twice that day: its draft, then its commit `87a9608ea` (the last five rows). It is
+SPECIFIED on its side too; it may still move, and then this section is redone.
 
 | Point | This contract before | `ua-rs-native` | Now |
 |---|---|---|---|
@@ -330,16 +358,20 @@ is redone).
 | Polkadot junctions | hard only; soft refused | hard and soft; a digit-only junction is a `u64`; bounds 16 junctions, 512 bytes | aligned (section 3.1) |
 | Preimage form per Ed25519 chain | NEAR, Sui and Stellar listed as full messages | NEAR and `gram` sign 32-byte hashes; messages for Solana, Aptos, Hedera body bytes, Substrate payloads | aligned (item 5); Sui and Stellar are 32-byte hashes by their own rules, which `ua-rs-native` does not list one by one |
 | Bitcoin network names | one chain `bitcoin` with two account types | two networks `bitcoin_p2wpkh`, `bitcoin_p2tr` | kept; mapped at the boundary (section 1) |
+| SS58 prefix | 0 on mainnet, 42 on testnet | per chain: Polkadot 0, generic Substrate 42, Paseo's read at its plan's T0 | aligned (section 3.1 step 7); Paseo pending |
+| Bitcoin change chain | receive chain only | receive `…/0/i` and change `…/1/i`, BIP-84 and BIP-86 | aligned (section 3.2, section 5) |
+| Digit-only junction with a leading zero | not stated | refused (`//0` accepted) | aligned: `JunctionInvalid` |
+| Off-chain messages | not stated | only inside the chain's envelope; the raw path refuses the Solana and Aptos envelope prefixes | aligned (section 5) |
+| Regtest addresses | not stated | `bcrt` encoded by the app from `witness_program()` | aligned (section 3.2) |
 | Vector file | `app-common/vectors/native.json` | `smartcontracts/vectors/native/native.json`, clientkeys writes first | both exist; shared rows byte-equal (item 6) |
 
-Equal without a change: Bitcoin BIP-84 and BIP-86 paths with coin `1'` on testnets and the bech32 / bech32m addresses;
-NEAR `m/44'/397'/i'` with the implicit account id; Polkadot sr25519, `substrate-bip39` from the entropy, the bare
-account, index 0 only, the `substrate` context, SS58 prefixes 0 and 42; ECDSA by RFC 6979 with no extra data, low-S,
-no low-R grinding; Taproot and sr25519 cross-verified, not byte-compared.
+Equal without a change: Bitcoin BIP-84 and BIP-86 receive paths with coin `1'` on testnets and the bech32 / bech32m
+addresses; NEAR `m/44'/397'/i'` with the implicit account id; Polkadot sr25519, `substrate-bip39` from the entropy, the
+bare account, index 0 only, the `substrate` context; ECDSA by RFC 6979 with no extra data, low-S, no low-R grinding;
+Taproot and sr25519 cross-verified, not byte-compared.
 
-Not covered by `ua-rs-native`, so nothing to compare: the vault, the endpoint lists, the error names, the unsigned
-transaction shapes, and Bitcoin change addresses (it derives the external chain `…/0/i` only; so does this contract,
-and a change output is an address of that chain).
+Not covered by `ua-rs-native`, so nothing to compare: the vault, the endpoint lists, the error names and the unsigned
+transaction shapes.
 
 ## 10. Open points
 
@@ -354,9 +386,12 @@ Not decided by this text; each is settled by the task named, then written back h
    transaction that splits the gas coin; Aptos: which entry function) is fixed by the first vector row both backends
    reproduce (task B5), not here.
 4. **`gram` on testnet:** the W5R1 wallet id for testnet is pinned by a vector row (task B5).
-5. **Polkadot era:** mortal or immortal by default is the caller's choice in the `era` field; the front-end default is
+5. **Paseo's SS58 prefix** is pending the `ua-rs-native` plan's T0 (section 3.1 step 7); the `polkadot` testnet address
+   row of the vectors waits for it.
+5a. **Polkadot era:** mortal or immortal by default is the caller's choice in the `era` field; the front-end default is
    set with the view-model contract (task B10).
-6. **Account list:** which accounts exist (seed id, chain, index, optional junction, name) is not secret and is not in
+6. **Account list:** which accounts exist (seed id, chain, index, `change` and account type for `bitcoin`, optional
+   junction and Substrate chain for `polkadot`, name) is not secret and is not in
    the vault. Its file format is written with the view-model contract (task B10).
 7. **Matrix crate:** its directory (`app-matrix/` proposed, as a crate of its own rather than a module of
    `app-core-rust`), the pinned `matrix-sdk` version, and what a locked app shows of chat are set by the Matrix task
