@@ -96,8 +96,10 @@ An unknown top-level or envelope field is `VaultFormat`: the file holds nothing 
 ### 2.4 Unlock, lock, write
 
 - **Unlock** of a seed: open its envelope, then hand the mnemonic and the BIP-39 passphrase to every backend compiled
-  into the build (`unlock` of [section 5](#5-backend-interface--specified)). In the `scaas` build `ua-rs` receives it
-  the same way. Nothing secret comes back out of a backend.
+  into the build (`unlock` of [section 5](#5-backend-interface--specified)). Nothing secret comes back out of a backend.
+- **In the `scaas` build** the core does not open the seed: `scaas-sdk` opens the same vault v1 file itself and the
+  mnemonic never leaves it (SCaaS owner ruling 2026-11-17 on the SDK spec's Q-A1 (a): one holder of the secret). Backends
+  (a) and (b) get no `unlock` there; they encode and assemble only (section 4, rule 5).
 - **Lock:** every backend's `lock`, then the core overwrites the entropy, the 64-byte seed, the passphrases and every
   derived key it holds. After lock, `derive` and `sign` return `Locked`.
 - **Write:** to a temporary file in the same directory, `fsync` the file, rename over `vault.json`, `fsync` the
@@ -158,10 +160,10 @@ polkadot.js.
    |---|---|
    | Polkadot | 0 |
    | generic Substrate (Westend among others) | 42 |
-   | Paseo | **pending**: task T0 of the `ua-rs-native` plan reads it from Paseo's chain spec and reports it; no value is assumed here |
+   | Paseo | 42 (read from Paseo's chain spec by task T0 of the `ua-rs-native` plan) |
 
-   The app's `testnet` environment for `polkadot` is Paseo, so its testnet address cannot be pinned until that value
-   is in. A prefix outside 0 to 16,383, or 46 or 47, is refused.
+   The app's `testnet` environment for `polkadot` is Paseo, prefix 42. A prefix outside 0 to 16,383, or 46 or 47, is
+   refused.
 
 ### 3.2 Bitcoin
 
@@ -190,17 +192,22 @@ Rules:
 3. No SCaaS kind appears in this table.
 4. A chain moves from (a) to (b), or to (c), only after the [cross-check](#8-cross-check-gate--specified) passes for
    that chain with both backends. Until then it stays where it is.
-5. With (c) the **encoding** stays with (b) or (a): that backend builds the signing preimage, `ua-rs` signs the digest
-   or message, the backend assembles the signed transaction. The digest comes only from a transaction built in this
-   process, the user has seen the decoded transaction first, and the raw-digest opt-in is used only on native keys.
+5. With (c), `evm` and `hedera` (the EVM alias) are encoded and signed by `scaas-sdk`'s `EvmTx` (an EVM key never signs
+   a hash raw). For every other chain the **encoding** stays with (b) or (a): that backend builds the signing preimage,
+   the SDK's guarded raw entry signs it (an envelope call for NEAR, Sui and Stellar; a message for Solana, Aptos and
+   Polkadot; a bare 32-byte digest only for the Bitcoin sighash), the backend assembles the signed transaction. The
+   preimage comes only from a transaction built in this process and the user has seen the decoded transaction first.
 
 | Chain | Default build | `SCAAS_BACKEND_TWC=OFF`, `SCAAS_BACKEND_TXCODEC_SHIP=ON` | `scaas` build |
 |---|---|---|---|
-| `evm`, `hedera` | (b) | (a) | (c) signs, (b) encodes |
-| `bitcoin` | (b) | (a) | as default, until `ua-rs` has the network |
-| `cosmos`, `solana`, `stellar`, `sui`, `aptos`, `gram` | (b) where 4.8.4 gives this table's addresses; else (a) | (a) | (c) once `ua-rs` signs that chain's message; before that as default |
-| `near` | (b) | (a) | as default, until `ua-rs` has the network |
-| `polkadot` | (a): Trust Wallet Core 4.8.4 has only ed25519 `m/44'/354'/0'/0'/0'` for Polkadot and no sr25519 signer | (a) | (c) once `ua-rs` has an sr25519 signer; before that (a) |
+| `evm`, `hedera` | (b) | (a) | (c) encodes and signs (`EvmTx`) |
+| `bitcoin`, `near` | (b) | (a) | (c) signs, (b) or (a) encodes |
+| `solana`, `stellar`, `sui`, `aptos` | (b) where 4.8.4 gives this table's addresses; else (a) | (a) | (c) signs, (b) or (a) encodes |
+| `cosmos`, `gram` | (b) where 4.8.4 gives this table's addresses; else (a) | (a) | **open** (point 11): the SDK's raw entry does not cover them yet |
+| `polkadot` | (a): Trust Wallet Core 4.8.4 has only ed25519 `m/44'/354'/0'/0'/0'` for Polkadot and no sr25519 signer | (a) | (c) signs, (a) encodes |
+
+The `scaas` build needs `ua-rs-native` merged (Bitcoin, NEAR, Polkadot and the envelope calls); there is no interim in
+which the core also opens the seed for a chain `ua-rs` lacks.
 
 The starting state of both cores is every chain at (a); each "(b)" above is a target that rule 4 has to confirm.
 
@@ -312,8 +319,9 @@ gas estimates stay `failover`.
 `NoTrustedEndpoint`. Under `strict_majority`, a list that holds a `discovered` endpoint serves it only when `n ≥ 3`,
 else `AgreementNeedsThree`. `named` and `default` endpoints may serve it alone.
 
-**Pending:** whether the agreeing group must also hold at least one `named` or `default` endpoint is open on the SCaaS
-side (the `scaas-rpc` spec's Q6). This contract takes the answer when it is given.
+Under `strict_majority` the agreeing group also holds at least one `named` or `default` endpoint (SCaaS owner ruling
+2026-11-17, the `scaas-rpc` spec's Q6 (b)): a list with none is `NoTrustedEndpoint` before any request; equal answers
+from `discovered` endpoints alone decide nothing; a round whose agreeing group has none is `EndpointNoMajority`.
 
 ### 6.5 Broadcast and transaction state
 
@@ -363,13 +371,11 @@ Numbers are appended, never reused.
 | 27 | `MatrixVerification` | a verification was cancelled, timed out or did not match |
 | 28 | `MatrixSend` | an event was not accepted by the homeserver |
 | 29 | `EndpointListEmpty` | a list with no endpoint |
-| 30 | `NoTrustedEndpoint` | a read that feeds a decryption, failover, only `discovered` endpoints |
+| 30 | `NoTrustedEndpoint` | a read that feeds a decryption with no `named` or `default` endpoint to serve it (failover: only `discovered` endpoints; strict majority: none in the list) |
 | 31 | `AgreementNeedsThree` | a read that feeds a decryption, strict majority, a `discovered` endpoint in a list of fewer than three |
+| 32 | `Argument` | an endpoint list refused when built: a duplicate endpoint, `strict_majority` with one endpoint or without a pinned `chain_uid`, a list-wide credential |
 
-The endpoint names (17 to 20, 29 to 31) are the same names `scaas-rpc` uses; the numbers are this contract's. A list
-refused for a duplicate endpoint, for `strict_majority` with one endpoint or without a pinned `chain_uid`, or for a
-list-wide credential has no name of its own here yet (`scaas-rpc` calls it `Argument`): it is reported as `Internal`
-with the reason until a name is appended (open point 9).
+The endpoint names (17 to 20, 29 to 32) are the same names `scaas-rpc` uses; the numbers are this contract's.
 
 A warning is not an error: `short_seed` (section 2.3) comes back beside a success.
 
@@ -428,7 +434,7 @@ SPECIFIED on its side too; it may still move, and then this section is redone.
 | Polkadot junctions | hard only; soft refused | hard and soft; a digit-only junction is a `u64`; bounds 16 junctions, 512 bytes | aligned (section 3.1) |
 | Preimage form per Ed25519 chain | NEAR, Sui and Stellar listed as full messages | NEAR and `gram` sign 32-byte hashes; messages for Solana, Aptos, Hedera body bytes, Substrate payloads | aligned (item 5); Sui and Stellar are 32-byte hashes by their own rules, which `ua-rs-native` does not list one by one |
 | Bitcoin network names | one chain `bitcoin` with two account types | two networks `bitcoin_p2wpkh`, `bitcoin_p2tr` | kept; mapped at the boundary (section 1) |
-| SS58 prefix | 0 on mainnet, 42 on testnet | per chain: Polkadot 0, generic Substrate 42, Paseo's read at its plan's T0 | aligned (section 3.1 step 7); Paseo pending |
+| SS58 prefix | 0 on mainnet, 42 on testnet | per chain: Polkadot 0, generic Substrate 42, Paseo 42 (its plan's T0) | aligned (section 3.1 step 7) |
 | Bitcoin change chain | receive chain only | receive `…/0/i` and change `…/1/i`, BIP-84 and BIP-86 | aligned (section 3.2, section 5) |
 | Digit-only junction with a leading zero | not stated | refused (`//0` accepted) | aligned: `JunctionInvalid` |
 | Off-chain messages | not stated | only inside the chain's envelope; the raw path refuses the Solana and Aptos envelope prefixes | aligned (section 5) |
@@ -456,8 +462,7 @@ Not decided by this text; each is settled by the task named, then written back h
    transaction that splits the gas coin; Aptos: which entry function) is fixed by the first vector row both backends
    reproduce (task B5), not here.
 4. **`gram` on testnet:** the W5R1 wallet id for testnet is pinned by a vector row (task B5).
-5. **Paseo's SS58 prefix** is pending the `ua-rs-native` plan's T0 (section 3.1 step 7); the `polkadot` testnet address
-   row of the vectors waits for it.
+5. **Paseo's SS58 prefix:** settled, 42 (section 3.1 step 7).
 5a. **Polkadot era:** mortal or immortal by default is the caller's choice in the `era` field; the front-end default is
    set with the view-model contract (task B10).
 6. **Account list:** which accounts exist (seed id, chain, index, `change` and account type for `bitcoin`, optional
@@ -466,11 +471,14 @@ Not decided by this text; each is settled by the task named, then written back h
 7. **Matrix crate:** its directory (`app-matrix/` proposed, as a crate of its own rather than a module of
    `app-core-rust`), the pinned `matrix-sdk` version, and what a locked app shows of chat are set by the Matrix task
    group (M1, M6) and written back to section 11.
-8. **`scaas-rpc` Q6** (section 6.4): whether a decryption-feeding majority needs one `named` or `default` endpoint.
-9. **A name for a refused endpoint-list configuration:** `scaas-rpc` uses `Argument`; this contract has no such name
-   yet (section 7). Appended with task B8.
+8. **`scaas-rpc` Q6:** settled (b) (section 6.4).
+9. **A name for a refused endpoint-list configuration:** settled, `Argument` = 32 (section 7).
 10. **Flag names** `SCAAS_BACKEND_TWC`, `SCAAS_BACKEND_TXCODEC_SHIP`, `SCAAS` and the feature `scaas` are settled; the
    pinned Trust Wallet Core version (4.8.4) moves only with a full cross-check run.
+11. **`cosmos` and `gram` in the `scaas` build:** the SDK's guarded raw entry refuses a GRAM key (its cell hash has the
+   form of its SCaaS payload) and does not list Cosmos, and the core may not open the seed there (section 2.4). Until the
+   SCaaS side gives both a signing path (an envelope call in `ua-rs`, as for NEAR, Sui and Stellar), the `scaas` build
+   cannot map them; this is a question for the SCaaS owner, not decided here.
 
 ## 11. Chat — SPECIFIED
 
