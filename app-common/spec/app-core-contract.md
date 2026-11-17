@@ -249,21 +249,83 @@ floating point anywhere. One object is one native transfer unless a row says mor
 
 ## 6. Endpoint lists — SPECIFIED
 
-`ARCH-POS-15` names the app: everything that reads or writes a chain through an RPC takes a **list** of endpoints.
+`ARCH-POS-15` names the app: everything that reads or writes a chain through an RPC takes a **list** of endpoints. This
+section follows the rules of the SCaaS network crate `scaas-rpc` (`CLI-RPC-02` to `CLI-RPC-09` in the SCaaS repository,
+`docs/clients/scaas-rpc.md`; SPECIFIED there too). Owner 2026-11-17: this contract follows the crate's rules. Where the
+two differ, the crate is right and this text is corrected.
 
-- Per (chain, environment): an ordered list of `{url, class, label}`. `class` is `default` (shipped in the release's
-  reviewed list), `named` (added by the user) or `discovered` (found at run time). A URL whose scheme is not `http` or
-  `https` is refused when it is added: `EndpointScheme`.
-- **Reads, `failover` (the default policy):** ask the first endpoint; on a transport error, a timeout, an HTTP 5xx or a
-  malformed answer, ask the next. A well-formed error from the chain is an answer, not a reason to move on. When the
-  list is exhausted: `EndpointAllFailed`. No retry beyond one pass of the list.
-- **Reads, `strict_majority` (optional, per chain):** ask every endpoint; accept a value only when more than half of
-  the list returned it; otherwise `EndpointNoMajority`. It needs at least three endpoints.
-- **Broadcast:** the same signed bytes go to the endpoints; a transaction is **never signed again** to try another
-  endpoint. "Already known" from a later endpoint counts as accepted. A rejection by the chain is `BroadcastRejected`;
-  the core reports "sent" only after an endpoint accepted the bytes.
-- In the `scaas` build the SCaaS side uses `scaas-rpc`'s rule, including: a read that feeds a decryption is never
-  served by a `discovered` endpoint alone (`ARCH-POS-13`).
+### 6.1 The list
+
+- Per (chain, environment): an ordered list of `{url, class, label, auth}`, and its read policy, `failover` (the
+  default) or `strict_majority`.
+- `class` is `default` (shipped in the release's reviewed list), `named` (added by the user) or `discovered` (found at
+  run time by the app).
+- `auth` is that endpoint's own credential, sent to that endpoint only, and stored as the **name** of an environment
+  variable or of a file, never as the value. A list has no list-wide credential.
+- Refused when the list is built: no endpoint (`EndpointListEmpty`); a scheme other than `http` / `https`
+  (`EndpointScheme`); two endpoints equal in scheme, host, port and path, compared as parsed URLs, not as strings;
+  `strict_majority` with one endpoint; `strict_majority` without a pinned chain identity (`chain_uid`).
+- No request follows a redirect: a 3xx is that endpoint's HTTP failure.
+- An endpoint answers only for the configured chain: its identity is read and compared before its first answer is
+  used; another chain's endpoint is dropped from every read.
+- No URL, credential or request body appears in a log line or an error.
+
+### 6.2 Reads, `failover`
+
+- Endpoints are asked in list order. One endpoint answers a whole read; answers of two endpoints are never mixed.
+- The next endpoint starts the read again when the current one: fails in transport; times out; answers **any HTTP error
+  status** (5xx, 429, 401, a 3xx included); answers an error that is no chain refusal; answers too large, too deep or
+  malformed; is another chain; or, being a later endpoint, has a head below the highest block seen from the first.
+- **A well-formed chain refusal (a revert) is final only from the first endpoint the read uses.** A later endpoint's
+  revert moves the read on, and its data is kept in the final error. An answer from a later endpoint is a value, never
+  a verdict.
+- One pass over the list, no retry inside a read. Every endpoint failing is `EndpointAllFailed`, carrying the last
+  failure and any later endpoint's revert data.
+- An account's own status reads (a transaction's status, the account's nonce or sequence, fee data) use the first
+  endpoint only and do not fail over.
+- Under `failover` the app caps fee and gas from its **own configuration**, never from the answering endpoint.
+
+### 6.3 Reads, `strict_majority`
+
+Optional, per chain. `n` is the length of the list; allowed at any `n ≥ 2`; a pinned `chain_uid` is required.
+
+1. Every endpoint passes the chain check and names its block for the read: its head minus a depth (default depth 1).
+2. The read block is the (⌊n/2⌋ + 1)-th highest named number. It is never below the last block the list agreed on.
+3. Each endpoint runs the whole read pinned to its header's **hash** at that block.
+4. Answers are compared as whole decoded values, the block hash included; never field by field, never as raw text. A
+   revert is a value, compared by its data.
+5. The read stands as soon as ⌊n/2⌋ + 1 endpoints hold equal answers at that hash; the others are not waited for.
+6. Otherwise one fallback round runs at the next lower named number; then `EndpointNoMajority`.
+7. A failing endpoint counts against the majority. Each request has its timeout; the whole read has one deadline.
+
+Tolerance: a read stands while at most ⌈n/2⌉ − 1 endpoints fail or lie. `n = 2` detects one liar and tolerates no
+failure; tolerating one needs `n ≥ 3`; an even `n` adds nothing over `n − 1`.
+
+Under this policy a new transaction's nonce is the agreed committed nonce at the read block plus the app's own count of
+transactions it has sent since, and fee data is the (⌊n/2⌋ + 1)-th highest of the endpoints' values. Simulations and
+gas estimates stay `failover`.
+
+### 6.4 Reads that feed a decryption (`scaas` build)
+
+`ARCH-POS-13`, `CLI-RPC-06`. A read whose bytes enter a decryption is marked so by the caller: PQZ and Zether words, and
+**chat ciphertexts read from state**. Under `failover`, `discovered` endpoints are skipped for it; none left is
+`NoTrustedEndpoint`. Under `strict_majority`, a list that holds a `discovered` endpoint serves it only when `n ≥ 3`,
+else `AgreementNeedsThree`. `named` and `default` endpoints may serve it alone.
+
+**Pending:** whether the agreeing group must also hold at least one `named` or `default` endpoint is open on the SCaaS
+side (the `scaas-rpc` spec's Q6). This contract takes the answer when it is given.
+
+### 6.5 Broadcast and transaction state
+
+- The same signed bytes go to the first endpoint or to all; a transaction is **never signed again** for another
+  endpoint. The transaction id is computed locally from the bytes.
+- Per endpoint the outcome is accepted (an "already known" answer included), refused (its reason kept) or unreachable.
+  The merge is `Sent` when at least one endpoint accepted, else `Rejected`, with every endpoint's outcome.
+- **Neither is a verdict.** After `Rejected` the transaction may still land; after `Sent` it may never land. The core
+  never re-sends automatically on either.
+- A transaction ends only on facts from a decisive read at a final block: a read agreed under `strict_majority`, or
+  under `failover` answered whole by the first endpoint when that endpoint is not `discovered`. Until then it is
+  pending or included, and the front-end says so; it never shows "failed" while the bytes may still land.
 
 ## 7. Error names — SPECIFIED
 
@@ -289,9 +351,9 @@ Numbers are appended, never reused.
 | 15 | `AddressInvalid` | a destination that is not an address of that chain and environment |
 | 16 | `AmountInvalid` | not a positive decimal integer string, or out of range |
 | 17 | `EndpointScheme` | a URL that is not `http` or `https` |
-| 18 | `EndpointAllFailed` | every endpoint of the list failed |
-| 19 | `EndpointNoMajority` | `strict_majority` found no value on more than half |
-| 20 | `BroadcastRejected` | the chain refused the signed bytes |
+| 18 | `EndpointAllFailed` | failover: no endpoint answered the whole read; carries the last failure (its URL redacted) and a later endpoint's revert data |
+| 19 | `EndpointNoMajority` | strict majority: no ⌊n/2⌋ + 1 equal whole answers at one block after the fallback round |
+| 20 | `BroadcastRejected` | the code of a send whose merged outcome is `Rejected`: no endpoint accepted the bytes. **Not a verdict:** the transaction may still land, and nothing is re-sent automatically (section 6.5) |
 | 21 | `AbiMismatch` | a binding and its core disagree on the ABI version |
 | 22 | `ScaasKindRefused` | a SCaaS kind reached a native backend |
 | 23 | `Internal` | a failure with no better name; carries no secret |
@@ -300,6 +362,14 @@ Numbers are appended, never reused.
 | 26 | `MatrixStore` | the local store cannot be opened, or no secret storage holds its key |
 | 27 | `MatrixVerification` | a verification was cancelled, timed out or did not match |
 | 28 | `MatrixSend` | an event was not accepted by the homeserver |
+| 29 | `EndpointListEmpty` | a list with no endpoint |
+| 30 | `NoTrustedEndpoint` | a read that feeds a decryption, failover, only `discovered` endpoints |
+| 31 | `AgreementNeedsThree` | a read that feeds a decryption, strict majority, a `discovered` endpoint in a list of fewer than three |
+
+The endpoint names (17 to 20, 29 to 31) are the same names `scaas-rpc` uses; the numbers are this contract's. A list
+refused for a duplicate endpoint, for `strict_majority` with one endpoint or without a pinned `chain_uid`, or for a
+list-wide credential has no name of its own here yet (`scaas-rpc` calls it `Argument`): it is reported as `Internal`
+with the reason until a name is appended (open point 9).
 
 A warning is not an error: `short_seed` (section 2.3) comes back beside a success.
 
@@ -371,7 +441,7 @@ bare account, index 0 only, the `substrate` context; ECDSA by RFC 6979 with no e
 Taproot and sr25519 cross-verified, not byte-compared.
 
 Not covered by `ua-rs-native`, so nothing to compare: the vault, the endpoint lists, the error names and the unsigned
-transaction shapes.
+transaction shapes. The endpoint lists follow `scaas-rpc` instead (section 6).
 
 ## 10. Open points
 
@@ -396,7 +466,10 @@ Not decided by this text; each is settled by the task named, then written back h
 7. **Matrix crate:** its directory (`app-matrix/` proposed, as a crate of its own rather than a module of
    `app-core-rust`), the pinned `matrix-sdk` version, and what a locked app shows of chat are set by the Matrix task
    group (M1, M6) and written back to section 11.
-8. **Flag names** `SCAAS_BACKEND_TWC`, `SCAAS_BACKEND_TXCODEC_SHIP`, `SCAAS` and the feature `scaas` are settled; the
+8. **`scaas-rpc` Q6** (section 6.4): whether a decryption-feeding majority needs one `named` or `default` endpoint.
+9. **A name for a refused endpoint-list configuration:** `scaas-rpc` uses `Argument`; this contract has no such name
+   yet (section 7). Appended with task B8.
+10. **Flag names** `SCAAS_BACKEND_TWC`, `SCAAS_BACKEND_TXCODEC_SHIP`, `SCAAS` and the feature `scaas` are settled; the
    pinned Trust Wallet Core version (4.8.4) moves only with a full cross-check run.
 
 ## 11. Chat — SPECIFIED
