@@ -1,6 +1,7 @@
 # scaas-app
 
-The end-user app of SCaaS: accounts and assets on native chains, SCaaS accounts and tokens, and PqChat, in one app.
+The end-user app of SCaaS: accounts and assets on native chains, Matrix chat, and, in the `scaas` build, SCaaS accounts
+and tokens and PqChat, in one app.
 Its name is **scaas-app**. It is not called a "wallet": it has chat.
 
 Status of this repository: layout and the shared contract only. No app code is here yet. Everything cryptographic that
@@ -13,6 +14,7 @@ this app uses or will use is `UNAUDITED`.
 | `app-common/` | Shared, toolkit-free material: the contract both app cores implement, the vectors, the view-model contract, the C++ transaction codec | `spec/` written; the rest arrives by task |
 | `app-core-rust/` | The Rust app core: a crate exporting a C ABI and a flutter_rust_bridge surface; used by the Flutter and Rust front-ends, usable by Qt | not started |
 | `app-rust/` | The Rust front-end, built with Dioxus. It links `app-core-rust` as a crate (no C ABI hop; the `scaas` feature flows through). Desktop first; it renders through the system WebView, so text input uses the OS input method | not started |
+| `app-matrix/` | The Matrix crate, toolkit-free: one `matrix-rust-sdk` client and one login per app, Matrix's own end-to-end encryption, device verification. Every front-end uses it; in the `scaas` build `pqchat-core` sends its envelopes through the same client. Directory name proposed | not started |
 | `app-flutter/` | The Flutter front-end, the mobile front-end; it reaches `app-core-rust` through flutter_rust_bridge | not started |
 | `scaas-qt-wallet-client/` | **A separate repository**, ignored by this one. The Qt front-end and `app-core-qt`, the C++ app core. A fork of the Status desktop app (MPL-2.0), branch `qt-wallet` | Tasks 1–16 of its core plan built |
 | `scaas-app-status/` | **A separate repository**, ignored by this one. An unmodified checkout of the upstream Status desktop app, kept as the design reference: screens are learned from its QML source, never from screenshots | reference only |
@@ -47,7 +49,9 @@ Variants are chosen by compile-time options only. Nothing is generated to drop f
 | `SCAAS` | CMake (`app-core-qt`) | `OFF` | brings in `scaas-sdk` and `ua-rs` together, and with them every SCaaS feature including PqChat |
 | `scaas` | Cargo feature (`app-core-rust`) | off | the same as `SCAAS` |
 
-The default build links neither `ua-rs` nor `scaas-sdk`: native accounts only, no chat. Switching a flag or a backend
+The default build links neither `ua-rs` nor `scaas-sdk`. It has native accounts and ordinary Matrix chat with Matrix's
+own end-to-end encryption (Olm / Megolm: classical, not post-quantum). The `scaas` build adds PqChat beside it. There
+is one Matrix stack for every front-end, `matrix-rust-sdk`; no libQuotient, no Waku. Switching a flag or a backend
 never changes an account: the vault belongs to the app, and the same mnemonic gives the same addresses in every build.
 
 ## Licence and brand

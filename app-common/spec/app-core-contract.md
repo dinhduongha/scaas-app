@@ -23,6 +23,7 @@ This text was compared with that spec on 2026-11-17; what was aligned is listed 
 - It never derives, stores, encodes or signs a SCaaS kind (a Universal Account, an `mtx*` record, PQZ, Zether, PqChat).
   Those exist only in the `scaas` build, through `scaas-sdk` and `ua-rs` (`CLI-UAL-01`, in force from `scaas-sdk`
   down). A request to a native backend that names a SCaaS kind is refused with `ScaasKindRefused`.
+- It does not own chat. Chat is a separate crate under the same contract: [section 11](#11-chat--specified).
 - No screen, script or web page reaches a raw "sign this message" call. The only signing entry is
   `sign(chain, unsigned transaction)` of [section 5](#5-backend-interface--specified).
 
@@ -266,6 +267,11 @@ Numbers are appended, never reused.
 | 21 | `AbiMismatch` | a binding and its core disagree on the ABI version |
 | 22 | `ScaasKindRefused` | a SCaaS kind reached a native backend |
 | 23 | `Internal` | a failure with no better name; carries no secret |
+| 24 | `MatrixLogin` | the homeserver refused the login, or discovery failed |
+| 25 | `MatrixSession` | no session, or the stored one is no longer valid |
+| 26 | `MatrixStore` | the local store cannot be opened, or no secret storage holds its key |
+| 27 | `MatrixVerification` | a verification was cancelled, timed out or did not match |
+| 28 | `MatrixSend` | an event was not accepted by the homeserver |
 
 A warning is not an error: `short_seed` (section 2.3) comes back beside a success.
 
@@ -352,5 +358,80 @@ Not decided by this text; each is settled by the task named, then written back h
    set with the view-model contract (task B10).
 6. **Account list:** which accounts exist (seed id, chain, index, optional junction, name) is not secret and is not in
    the vault. Its file format is written with the view-model contract (task B10).
-7. **Flag names** `SCAAS_BACKEND_TWC`, `SCAAS_BACKEND_TXCODEC_SHIP`, `SCAAS` and the feature `scaas` are settled; the
+7. **Matrix crate:** its directory (`app-matrix/` proposed, as a crate of its own rather than a module of
+   `app-core-rust`), the pinned `matrix-sdk` version, and what a locked app shows of chat are set by the Matrix task
+   group (M1, M6) and written back to section 11.
+8. **Flag names** `SCAAS_BACKEND_TWC`, `SCAAS_BACKEND_TXCODEC_SHIP`, `SCAAS` and the feature `scaas` are settled; the
    pinned Trust Wallet Core version (4.8.4) moves only with a full cross-check run.
+
+## 11. Chat — SPECIFIED
+
+Owner ruling 2026-11-17. The app core of sections 1 to 8 does not own chat; a separate toolkit-free crate does
+(`app-matrix/`, name proposed). Both builds and every front-end use it.
+
+### 11.1 What each build offers
+
+| Build | Chat |
+|---|---|
+| default (no SCaaS) | ordinary Matrix chat, end-to-end encrypted by Matrix itself (Olm / Megolm) |
+| `scaas` | the same, **plus** PqChat sessions through `pqchat-core` |
+
+- Matrix's encryption is classical, not post-quantum. The front-end says so where it describes a conversation's
+  protection; it never presents a Matrix conversation as post-quantum.
+- The two kinds of conversation are never mixed. A PqChat session is not a Matrix room to the user, even when a Matrix
+  room carries its envelopes; a Matrix room is never upgraded into a PqChat session in place.
+- Olm and Megolm keys belong to `matrix-sdk`. They are not SCaaS kinds, are not derived from a seed, and are not in the
+  vault. `CLI-UAL-01` does not concern them; every PqChat signature and key still comes from `ua-rs`.
+- No other transport and no home-made envelope: no Waku, no app-defined encryption layer.
+
+### 11.2 One stack, one client, one login
+
+- One Matrix stack for every front-end: `matrix-rust-sdk` (`matrix-sdk` with the feature `e2e-encryption`), pinned to
+  one exact stable version. No libQuotient.
+- One client and one login per app. The crate owns the session; `app-core-qt` reaches it through its C ABI,
+  `app-core-rust` and the Dioxus front-end as a crate, Flutter through the bridge.
+- In the `scaas` build `pqchat-core` uses **that same client** as its Matrix store: it hands over an already
+  PQ-encrypted, signed envelope, which is sent as a `net.scaas.pqchat.v1` event, and every such event received goes
+  back to `pqchat-core`. There is no second login and no second sync loop. So the Matrix crate, `pqchat-core`,
+  `scaas-sdk` and `ua-rs` are linked into one Rust library in that build.
+- In the default build a `net.scaas.pqchat.v1` event is shown as "needs the SCaaS build", never as a message.
+
+### 11.3 Login and session
+
+- Homeserver: an `https` URL (`EndpointScheme` otherwise), with `.well-known` discovery. A homeserver is not a chain
+  RPC: `ARCH-POS-15`'s endpoint lists do not apply, an account has one homeserver.
+- Login by password or by single sign-on in the system browser. The Matrix password is never stored.
+- The session (user id, device id, access and refresh tokens) is kept by the crate so the app restores it at start
+  without asking again. Logging out invalidates the token on the server and deletes the local store.
+- Locking the vault does not log out of Matrix: the Matrix account is not tied to a seed. What a locked app shows of
+  chat is the front-end's rule, set in the view-model contract.
+- No token, key or message text appears in an error or a log line.
+
+### 11.4 Store
+
+- The SDK's state and crypto stores are on disk in the app's private data directory, encrypted under a random 32-byte
+  store key made at first login.
+- The store key is kept in the operating system's secret storage (Keychain, Android Keystore, the Secret Service,
+  Windows credentials). It is not in `vault.json`, whose format holds seeds only (section 2), and it is not derived
+  from a seed or a vault passphrase.
+- Without that secret storage the crate refuses to persist a session (`MatrixStore`) rather than write the key beside
+  the store; the user logs in again at each start.
+
+### 11.5 Encryption and device verification
+
+- A direct conversation the app creates is encrypted from its first event. The app never turns encryption off in a
+  room. A room that is not encrypted carries a flag, and the front-end labels it.
+- Cross-signing is set up at first login on a new account, or the device is verified against an existing one.
+- Verifying a device: by comparing emoji (SAS) or by QR code, with the other device or the other user. The outcome is
+  one of verified, unverified, or changed-since-verified; the last is shown as a warning, never silently accepted.
+- A message from an unverified device is shown with that state. A message that cannot be decrypted is shown as
+  undecryptable, never as empty and never dropped.
+- Key backup: a recovery key is shown once at setup; server-side key backup is optional and off until the user turns
+  it on. Losing every device and the recovery key loses the history; the app says so at setup.
+
+### 11.6 What the front-end gets
+
+Models and events, in the view-model contract's terms: the room list (id, name, last event, unread, encrypted,
+verification state), a paged timeline per room, incoming events, send results, the login state, the verification
+flow's steps. Actions: log in, log out, create a direct conversation, send text, start and answer a verification, set
+up and use the recovery key. Attachments and calls are not in this version.
