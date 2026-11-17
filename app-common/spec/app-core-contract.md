@@ -511,7 +511,7 @@ Owner ruling 2026-11-17. The app core of sections 1 to 8 does not own chat; a se
 - In the `scaas` build `pqchat-core` uses **that same client** as its Matrix store: it hands over an already
   PQ-encrypted, signed envelope, which is sent as a `net.scaas.pqchat.v1` event, and every such event received goes
   back to `pqchat-core`. There is no second login and no second sync loop. So the Matrix crate, `pqchat-core`,
-  `scaas-sdk` and `ua-rs` are linked into one Rust library in that build (`app-lib`, section 12).
+  `scaas-sdk` and `ua-rs` are linked into one Rust library in that build (`app-core-rust`, section 12).
 - In the default build a `net.scaas.pqchat.v1` event is shown as "needs the SCaaS build", never as a message.
 
 ### 11.3 Login and session
@@ -558,24 +558,27 @@ up and use the recovery key. Attachments and calls are not in this version.
 
 SCaaS owner rulings 2026-11-17: `scaas-sdk` is the generic platform; app cores (`pqchat-core`, `pqvault-core`, a third
 party's) depend on it and the SDK has no module for any of them ("Đồng ý đảo chiều", "pqchat-core cũng đảo chiều luôn").
-This contract places them in the app ("Ok, theo đề xuất, ghi vào contract scaas-app").
+This contract places them in the app ("Ok, theo đề xuất, ghi vào contract scaas-app"; "Ok, theo đề xuất (2), bỏ
+app-lib": no separate aggregating crate).
 
-- **One Rust library, `app-lib/`** (name proposed): toolkit-free, the only Rust library an app binary links.
-  - Always: `app-matrix` (section 11) and the one tokio runtime of the app.
-  - With the feature `scaas`: `scaas-sdk`, and through it `ua-rs` and `scaas-rpc`; the SDK adopts the library's runtime.
-  - With the feature `pqchat` (implies `scaas`): `pqchat-core`, which takes `app-matrix`'s live client as its Matrix store.
-  - With the feature `pqvault` (implies `scaas`): `pqvault-core`.
-  - A later app core, SCaaS's or a third party's, is one more feature of the same form: it depends on `scaas-sdk`, never
+- **`app-core-rust` is the only Rust library an app binary links.** Its features:
+  - `native-core` (on by default): the app core of sections 1 to 8 (vault, native derivation and signing, backends);
+  - always: `app-matrix` (section 11) and the one tokio runtime of the app;
+  - `scaas`: `scaas-sdk`, and through it `ua-rs` and `scaas-rpc`; the SDK adopts the library's runtime;
+  - `pqchat` (implies `scaas`): `pqchat-core`, which takes `app-matrix`'s live client as its Matrix store;
+  - `pqvault` (implies `scaas`): `pqvault-core`;
+  - a later app core, SCaaS's or a third party's, is one more feature of the same form: it depends on `scaas-sdk`, never
     the reverse.
-- **Rust and Flutter front-ends:** `app-core-rust` depends on `app-lib` as a crate and adds the app core of sections 1
-  to 8 and the bridge surface; that crate is the binary's one library.
-- **Qt front-end:** `app-core-qt` (C++) links `app-lib` as one static library; the app core of sections 1 to 8 stays in
-  C++, and the SDK and the app cores are not rewritten in C++. How C++ reaches them is fixed by the SDK's binding spike
-  (its task T3, question Q-B1): (a) UniFFI with `uniffi-bindgen-cpp`, or the fallback (b), `app-lib`'s own C surface,
-  the one `app-matrix` already uses. A Qt binary never links `app-core-rust`, and no binary links two Rust libraries.
+- **Rust and Flutter front-ends** link `app-core-rust` with `native-core` on.
+- **Qt front-end:** `app-core-qt` (C++) keeps the app core of sections 1 to 8 and links `app-core-rust` as one static
+  library built **without** `native-core` (`--no-default-features` plus the features the build needs), so one binary
+  never holds two app cores. A build check refuses a Qt link whose Rust library exports a `native-core` symbol. How C++
+  reaches the SDK and the app cores is fixed by the SDK's binding spike (its task T3, question Q-B1): (a) UniFFI with
+  `uniffi-bindgen-cpp`, or the fallback (b), `app-core-rust`'s own C surface, the one `app-matrix` already uses. The SDK
+  and the app cores are not rewritten in C++.
 - **One runtime, one Matrix client, one login, one SDK instance per process**, shared by every app core.
 - **Secrets** (SCaaS conditions, written in the SDK spec): an app core gets key handles from the SDK, never key bytes;
   the only bytes that leave are plaintexts decrypted for the user (a revealed password, a chat message). An app core's
   signing call is refused for every SCaaS purpose and for any typed digest whose domain is a SCaaS contract or the
   registry. If the SDK cannot meet both, the app core stays inside the SDK.
-- **The default build** links none of this beyond `app-matrix`: no `scaas-sdk`, no `ua-rs`, no app core.
+- **The default build** links none of the SCaaS parts: no `scaas-sdk`, no `ua-rs`, no app core.
