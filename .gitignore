@@ -1,6 +1,77 @@
-scaas-qt-wallet-client
-scaas-app-status
+# Separate repositories checked out inside this one (each has its own remote)
+/scaas-qt-wallet-client/
+/scaas-app-status/
+
+# Secrets and local state: never committed (repo is public)
+.env
+.env.*
+!.env.example
+*.keystore
+*.jks
+*.p12
+*.pem
+*.key
+keystore*.json
+vault*.json
+*mnemonic*
+*.secret
+key.properties
+google-services.json
+GoogleService-Info.plist
+HANDOFF.md
+scratchpad/
+
+# Rust (app-core-rust, app-rust / Dioxus)
 target/
-build/
+**/*.rs.bk
+.dioxus/
+dist/
+
+# Flutter / Dart (app-flutter)
 .dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+**/build/
+**/android/.gradle/
+**/android/local.properties
+**/android/app/debug/
+**/android/app/release/
+**/ios/Pods/
+**/ios/.symlinks/
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/flutter_export_environment.sh
+**/ios/Flutter/ephemeral/
+**/linux/flutter/ephemeral/
+**/macos/Flutter/ephemeral/
+**/windows/flutter/ephemeral/
+*.iml
+
+# C++ (app-common/txcodec)
+build/
+cmake-build-*/
+compile_commands.json
+CMakeUserPresets.json
+
+# Built artifacts: source and build scripts only, no binaries on GitHub
+*.so
+*.dylib
+*.dll
+*.a
+*.lib
+*.exe
+*.apk
+*.aab
+*.ipa
+*.AppImage
+*.dmg
+*.msi
+
+# Logs, editors, OS
 *.log
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
