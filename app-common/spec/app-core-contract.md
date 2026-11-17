@@ -13,8 +13,8 @@ Sources: the owner's rulings of 2026-11-17 (recorded in the Qt repository,
 repository, `docs/decisions.md`.
 
 **`[= ua-rs-native]`** marks a value that must equal the one in the SCaaS-side spec for `ua-rs` as a native backend
-(`docs/superpowers/specs/2026-11-17-ua-rs-native.md` in the SCaaS repository). That spec did not exist when this text
-was written, so nothing here has been compared with it yet: see [open points](#10-open-points).
+(`docs/superpowers/specs/2026-11-17-ua-rs-native.md` in the SCaaS repository, branch `ua-rs-native`, itself SPECIFIED).
+This text was compared with that spec on 2026-11-17; what was aligned is listed in [section 9.1](#91-comparison-of-2026-11-17).
 
 ## 1. Scope — SPECIFIED
 
@@ -27,8 +27,9 @@ was written, so nothing here has been compared with it yet: see [open points](#1
   `sign(chain, unsigned transaction)` of [section 5](#5-backend-interface--specified).
 
 Chain ids used throughout: `evm`, `hedera`, `bitcoin`, `cosmos`, `solana`, `stellar`, `near`, `sui`, `aptos`, `gram`,
-`polkadot`. Environments: `mainnet`, `testnet`, one value for the whole app. (`ua-rs` calls `gram` `ton` and `hedera`
-`hedera_ecdsa`; the app core maps the names at that boundary.)
+`polkadot`. Environments: `mainnet`, `testnet`, one value for the whole app. The app core maps names at the `ua-rs`
+boundary: `gram` is `ton`, `hedera` is `hedera_ecdsa`, and `bitcoin` is `bitcoin_p2wpkh` or `bitcoin_p2tr` by the
+account's type.
 
 ## 2. Vault — SPECIFIED
 
@@ -86,8 +87,10 @@ An unknown top-level or envelope field is `VaultFormat`: the file holds nothing 
   front-end shows the warning at import and wherever that seed is listed. Any other count, a word outside the English
   list or a bad checksum: `MnemonicInvalid`.
 - Normalisation before the checksum: NFKD, lower case, single spaces.
-- The BIP-39 passphrase (NFKD) is entered at unlock, mixed into the 64-byte seed, and never written anywhere. An empty
-  one is the main account set; another one is a hidden set. A wrong one is not an error: it gives other addresses.
+- The BIP-39 passphrase is entered at unlock and never written anywhere. An empty one is the main account set; another
+  one is a hidden set. A wrong one is not an error: it gives other addresses. The core keeps it **as entered** and hands
+  it to the backends unchanged: the BIP-39 seed normalises it (NFKD), the Polkadot derivation of section 3.1 does not.
+  The front-end warns on a non-ASCII passphrase: its NFC and NFD forms give one BIP-39 seed but two Polkadot accounts.
 
 ### 2.4 Unlock, lock, write
 
@@ -130,15 +133,19 @@ Owner rulings 2026-11-17: sr25519 with the substrate-bip39 derivation, from the 
 polkadot.js.
 
 1. Mini-secret: the first 32 bytes of `PBKDF2-HMAC-SHA512(password = BIP-39 entropy bytes, salt = "mnemonic" ‖
-   NFKD(BIP-39 passphrase), 2048 rounds, 64 bytes)`. The password is the **entropy**, not the mnemonic sentence: this
-   is not the BIP-39 seed.
+   UTF-8(BIP-39 passphrase as entered), 2048 rounds, 64 bytes)`. The password is the **entropy**, not the mnemonic
+   sentence: this is not the BIP-39 seed. The passphrase is **not** NFKD-normalised here, as `substrate-bip39` and
+   polkadot.js take it.
 2. Expand the mini-secret to an sr25519 key pair (the Ed25519 expansion mode).
 3. **No junction** by default: the key of step 2 is the account. Mainnet and testnet use the same key and differ only
    in the SS58 prefix.
-4. An account may carry an optional derivation string of hard junctions (`//polkadot`, `//paseo`, …) as a per-account
-   setting, applied to the key of step 2 as Substrate does (the junction SCALE-encoded as the chain code, hashed with
-   BLAKE2b-256 when longer than 32 bytes). Soft junctions (`/name`) and a `///password` suffix are refused with
-   `JunctionInvalid`. The junction is account data, never a constant in a core.
+4. An account may carry an optional junction path (`//polkadot`, `//paseo`, …) as a per-account setting, applied to the
+   key of step 2. Grammar, chain codes and bounds are exactly those of `ua-rs-native` section 7.3: `//` hard and `/`
+   soft junctions of 1 to 64 printable ASCII bytes; a digit-only junction is its `u64` little-endian, any other the
+   SCALE string; an encoding of at most 32 bytes zero-padded, a longer one replaced by its BLAKE2b-256; at most 16
+   junctions and 512 bytes. Refused with `JunctionInvalid`: a `///` password part, an empty junction, one starting
+   with `0x` or `+`, a digit-only one outside `u64`. A path is public account data, never a constant in a core, never
+   a password. A soft-derived key's signatures are not reproducible across tools: verify only.
 5. Index: `derive("polkadot", 0)` is the bare account. Any other index without a junction is `IndexUnsupported`;
    further accounts are made with a junction.
 6. Signing context: `substrate`.
@@ -293,16 +300,47 @@ For `ua-rs` to be backend (c) of a chain, these must be byte-equal between this 
    default, the `substrate` signing context;
 3. the address encodings of section 3;
 4. the signature rules of section 5 (RFC 6979 without extra entropy, low-S, no low-R grinding; RFC 8032);
-5. the preimage each chain hands to `ua-rs` (a 32-byte digest for secp256k1 chains; the full message for the Ed25519
-   chains whose preimage is longer than 32 bytes: Solana, Aptos, Sui's intent hash input, NEAR, Stellar);
-6. the rows of `app-common/vectors/native.json` that the SCaaS repository's vectors also carry.
+5. the preimage each chain hands to `ua-rs`. A 32-byte digest (`sign_digest`): the secp256k1 chains (Bitcoin: the
+   BIP-143 or BIP-341 sighash), NEAR (`sha256` of the Borsh transaction), `gram` (the cell hash), Sui (the BLAKE2b-256
+   intent hash), Stellar (the SHA-256 of the signature payload). The full message (`sign_message`, at most 128 KiB):
+   Solana (the transaction message), Aptos (`sha3_256("APTOS::RawTransaction") ‖ BCS(raw)`), Polkadot (the SCALE
+   signing payload, or its BLAKE2b-256 when longer than 256 bytes; the app's encoder applies that rule);
+6. the rows of `app-common/vectors/native.json` that the SCaaS repository's `smartcontracts/vectors/native/native.json`
+   also carries. That file is written by clientkeys first; its mnemonics (`abandon` ×11 `about`, the same with
+   `TREZOR`, the Substrate development phrase, a 24-word phrase, a non-ASCII passphrase in NFC and NFD) are reused
+   here, so the same rows run through all three backends;
+7. the caller's obligations for a raw digest or message (`ua-rs-native` section 9, `CLI-SGN-54`): the preimage built in
+   this process from named fields, the decoded transaction shown first, never with a UA key or a SCaaS kind, one key
+   per network and purpose.
+
+### 9.1 Comparison of 2026-11-17
+
+Compared with `ua-rs-native` as it stood that day (SPECIFIED on its side too; it may still move, and then this section
+is redone).
+
+| Point | This contract before | `ua-rs-native` | Now |
+|---|---|---|---|
+| Polkadot passphrase in the mini-secret salt | NFKD-normalised | as given, not normalised | aligned: as given (sections 2.3, 3.1) |
+| Polkadot junctions | hard only; soft refused | hard and soft; a digit-only junction is a `u64`; bounds 16 junctions, 512 bytes | aligned (section 3.1) |
+| Preimage form per Ed25519 chain | NEAR, Sui and Stellar listed as full messages | NEAR and `gram` sign 32-byte hashes; messages for Solana, Aptos, Hedera body bytes, Substrate payloads | aligned (item 5); Sui and Stellar are 32-byte hashes by their own rules, which `ua-rs-native` does not list one by one |
+| Bitcoin network names | one chain `bitcoin` with two account types | two networks `bitcoin_p2wpkh`, `bitcoin_p2tr` | kept; mapped at the boundary (section 1) |
+| Vector file | `app-common/vectors/native.json` | `smartcontracts/vectors/native/native.json`, clientkeys writes first | both exist; shared rows byte-equal (item 6) |
+
+Equal without a change: Bitcoin BIP-84 and BIP-86 paths with coin `1'` on testnets and the bech32 / bech32m addresses;
+NEAR `m/44'/397'/i'` with the implicit account id; Polkadot sr25519, `substrate-bip39` from the entropy, the bare
+account, index 0 only, the `substrate` context, SS58 prefixes 0 and 42; ECDSA by RFC 6979 with no extra data, low-S,
+no low-R grinding; Taproot and sr25519 cross-verified, not byte-compared.
+
+Not covered by `ua-rs-native`, so nothing to compare: the vault, the endpoint lists, the error names, the unsigned
+transaction shapes, and Bitcoin change addresses (it derives the external chain `…/0/i` only; so does this contract,
+and a change output is an address of that chain).
 
 ## 10. Open points
 
 Not decided by this text; each is settled by the task named, then written back here.
 
-1. **Comparison with `ua-rs-native`:** not done, the SCaaS-side spec was not available. Until it is compared, section 9
-   is this contract's side only.
+1. **`ua-rs-native` is itself SPECIFIED** and marks its names and its junction grammar as proposals. Section 9.1 is
+   redone when it changes or is built.
 2. **Bitcoin path changed from the Qt client's code.** The built code derives `m/44'/0'/0'/0/0` and encodes P2WPKH; this
    contract follows the owner's brief (BIP-84, BIP-86 optional). The Qt client's pinned `bc1q…` and `tb1q…` addresses
    change with task B2. Taproot is specified here and built by no backend yet.
