@@ -14,6 +14,7 @@ this app uses or will use is `UNAUDITED`.
 | `app-common/` | Shared, toolkit-free material: the contract both app cores implement, the vectors, the view-model contract, the C++ transaction codec | `spec/` written; the rest arrives by task |
 | `app-core-rust/` | The Rust app core: a crate exporting a C ABI and a flutter_rust_bridge surface; used by the Flutter and Rust front-ends, usable by Qt | not started |
 | `app-rust/` | The Rust front-end, built with Dioxus. It links `app-core-rust` as a crate (no C ABI hop; the `scaas` feature flows through). Desktop first; it renders through the system WebView, so text input uses the OS input method | not started |
+| `app-lib/` | The app's one Rust library (name proposed): `app-matrix` always; with `scaas`, `scaas-sdk` (and `ua-rs`), plus the app cores `pqchat-core` (`pqchat`) and `pqvault-core` (`pqvault`), which depend on the SDK. `app-core-rust` uses it as a crate; `app-core-qt` links it as one static library. Contract section 12 | not started |
 | `app-matrix/` | The Matrix crate, toolkit-free: one `matrix-rust-sdk` client and one login per app, Matrix's own end-to-end encryption, device verification. Every front-end uses it; in the `scaas` build `pqchat-core` sends its envelopes through the same client. Directory name proposed | not started |
 | `app-flutter/` | The Flutter front-end, the mobile front-end; it reaches `app-core-rust` through flutter_rust_bridge | not started |
 | `scaas-qt-wallet-client/` | **A separate repository**, ignored by this one. The Qt front-end and `app-core-qt`, the C++ app core. A fork of the Status desktop app (MPL-2.0), branch `qt-wallet` | Tasks 1–16 of its core plan built |
@@ -47,7 +48,8 @@ Variants are chosen by compile-time options only. Nothing is generated to drop f
 | `SCAAS_BACKEND_TWC` | CMake (`app-core-qt`) | `ON` | compiles the Trust Wallet Core backend, the default for native chains |
 | `SCAAS_BACKEND_TXCODEC_SHIP` | CMake (`app-core-qt`) | `OFF` | lets the chain table map a chain to the C++ codec in a release binary; test targets always compile the codec |
 | `SCAAS` | CMake (`app-core-qt`) | `OFF` | brings in `scaas-sdk` and `ua-rs` together, and with them every SCaaS feature including PqChat |
-| `scaas` | Cargo feature (`app-core-rust`) | off | the same as `SCAAS` |
+| `scaas` | Cargo feature (`app-lib`, `app-core-rust`) | off | the same as `SCAAS` |
+| `SCAAS_PQCHAT`, `SCAAS_PQVAULT` | CMake (`app-core-qt`) | `ON` when `SCAAS` is `ON` | the app cores `pqchat-core` and `pqvault-core` (Cargo features `pqchat`, `pqvault`, each implying `scaas`); a `scaas` build may leave one out |
 
 The default build links neither `ua-rs` nor `scaas-sdk`. It has native accounts and ordinary Matrix chat with Matrix's
 own end-to-end encryption (Olm / Megolm: classical, not post-quantum). The `scaas` build adds PqChat beside it. There
