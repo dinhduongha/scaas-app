@@ -1,0 +1,6 @@
+scaas-qt-wallet-client
+scaas-app-status
+target/
+build/
+.dart_tool/
+*.log
