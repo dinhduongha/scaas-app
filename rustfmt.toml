@@ -1,0 +1,3 @@
+# One rustfmt config for every crate of this repository (app-core-rust, app-matrix, app-rust).
+# The same settings as the SCaaS repository's root rustfmt.toml; the toolchain pins the rustfmt version.
+max_width = 120

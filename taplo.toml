@@ -1,0 +1,5 @@
+# TOML formatting (Cargo.toml and other configs). Keys are never reordered: feature lists and pins keep their order.
+[formatting]
+reorder_keys = false
+reorder_arrays = false
+column_width = 120

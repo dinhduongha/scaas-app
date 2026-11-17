@@ -71,3 +71,11 @@ New source files here carry `SPDX-License-Identifier: LicenseRef-Vegan-Community
 Status app is in this repository, and no Status name, logo or look is used: Status-derived files live only in
 `scaas-qt-wallet-client/`, under MPL-2.0. `app-common/` holds nothing that depends on Qt, Flutter or a Status file.
 Only source and build scripts are published; no built binaries.
+
+## Formatting
+
+Every formatter reads a committed config file, the same settings as the SCaaS repository (owner 2026-11-17): `rustfmt.toml`
+(Rust), `.clang-format` (C / C++), `.editorconfig` (indentation, read by `shfmt` and editors), `.prettierrc` (YAML, JSON,
+Markdown), `taplo.toml` (TOML, no key reordering), and each Flutter package's `analysis_options.yaml` (Dart, added with the
+package). CI (`.github/workflows/format.yml`) only checks, at pinned tool versions, and fails on any difference; it never
+rewrites code. Format locally with the same tools before a commit.

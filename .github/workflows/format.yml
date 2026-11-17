@@ -1,0 +1,47 @@
+# Format checks only: CI never rewrites code; it fails on any difference. Each check runs only when its files exist.
+name: format
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  format:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust (rustfmt)
+        run: |
+          if git ls-files '*.rs' | grep -q .; then
+            rustup component add rustfmt
+            git ls-files '*.rs' | xargs rustfmt --check --edition 2021
+          fi
+      - name: C / C++ (clang-format)
+        run: |
+          files=$(git ls-files '*.c' '*.h' '*.cc' '*.cpp' '*.hpp')
+          if [ -n "$files" ]; then
+            pip install clang-format==19.1.7
+            clang-format --dry-run -Werror $files
+          fi
+      - name: Dart (dart format)
+        if: hashFiles('**/pubspec.yaml') != ''
+        uses: dart-lang/setup-dart@v1
+      - name: Dart check
+        if: hashFiles('**/pubspec.yaml') != ''
+        run: dart format --output=none --set-exit-if-changed $(git ls-files '*.dart')
+      - name: YAML (Prettier)
+        run: npx --yes prettier@3.3.3 --check $(git ls-files '*.yml' '*.yaml')
+      - name: Shell (shfmt)
+        run: |
+          files=$(git ls-files '*.sh')
+          if [ -n "$files" ]; then
+            curl -fsSL -o shfmt https://github.com/mvdan/sh/releases/download/v3.10.0/shfmt_v3.10.0_linux_amd64
+            chmod +x shfmt && ./shfmt -d $files
+          fi
+      - name: TOML (taplo)
+        run: |
+          files=$(git ls-files '*.toml')
+          if [ -n "$files" ]; then
+            curl -fsSL https://github.com/tamasfe/taplo/releases/download/0.9.3/taplo-linux-x86_64.gz | gunzip > taplo
+            chmod +x taplo && ./taplo fmt --check $files
+          fi
