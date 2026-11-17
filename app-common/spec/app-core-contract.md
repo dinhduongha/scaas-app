@@ -559,7 +559,7 @@ up and use the recovery key. Attachments and calls are not in this version.
 SCaaS owner rulings 2026-11-17: `scaas-sdk` is the generic platform; app cores (`pqchat-core`, `pqvault-core`, a third
 party's) depend on it and the SDK has no module for any of them ("Đồng ý đảo chiều", "pqchat-core cũng đảo chiều luôn").
 This contract places them in the app ("Ok, theo đề xuất, ghi vào contract scaas-app"; "Ok, theo đề xuất (2), bỏ
-app-lib": no separate aggregating crate).
+app-lib": no separate aggregating crate; "Ok, theo đề xuất, sửa mục 12 và README": Qt on either core).
 
 - **`app-core-rust` is the only Rust library an app binary links.** Its features:
   - `native-core` (on by default): the app core of sections 1 to 8 (vault, native derivation and signing, backends);
@@ -570,12 +570,19 @@ app-lib": no separate aggregating crate).
   - a later app core, SCaaS's or a third party's, is one more feature of the same form: it depends on `scaas-sdk`, never
     the reverse.
 - **Rust and Flutter front-ends** link `app-core-rust` with `native-core` on.
-- **Qt front-end:** `app-core-qt` (C++) keeps the app core of sections 1 to 8 and links `app-core-rust` as one static
-  library built **without** `native-core` (`--no-default-features` plus the features the build needs), so one binary
-  never holds two app cores. A build check refuses a Qt link whose Rust library exports a `native-core` symbol. How C++
-  reaches the SDK and the app cores is fixed by the SDK's binding spike (its task T3, question Q-B1): (a) UniFFI with
-  `uniffi-bindgen-cpp`, or the fallback (b), `app-core-rust`'s own C surface, the one `app-matrix` already uses. The SDK
-  and the app cores are not rewritten in C++.
+- **Qt front-end: two paths, one app core per binary**, chosen by the CMake option `SCAAS_QT_CORE` (name proposed):
+  - `cpp` (default): the app core of sections 1 to 8 is `app-core-qt` (C++); the binary links `app-core-rust` as one
+    static library built **without** `native-core` (`--no-default-features` plus the features the build needs), for
+    Matrix, the SDK and the app cores only. A build check refuses this link if the Rust library exports a
+    `native-core` symbol.
+  - `rust`: the app core is `app-core-rust` with `native-core`, reached through its C ABI; `app-core-qt`'s core is not
+    compiled into the binary.
+  - The Qt UI calls the core through one thin adapter with the contract's interface (`derive`, `sign`, the endpoint
+    lists, the error names of section 7), so both paths serve the same UI. CI runs the Qt UI's tests on both paths; this
+    adds to the cross-check of section 8, it does not replace it.
+  - How C++ reaches the SDK and the app cores is fixed by the SDK's binding spike (its task T3, question Q-B1): (a)
+    UniFFI with `uniffi-bindgen-cpp`, or the fallback (b), `app-core-rust`'s own C surface, the one `app-matrix` already
+    uses. The SDK and the app cores are not rewritten in C++.
 - **One runtime, one Matrix client, one login, one SDK instance per process**, shared by every app core.
 - **Secrets** (SCaaS conditions, written in the SDK spec): an app core gets key handles from the SDK, never key bytes;
   the only bytes that leave are plaintexts decrypted for the user (a revealed password, a chat message). An app core's

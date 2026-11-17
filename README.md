@@ -12,7 +12,7 @@ this app uses or will use is `UNAUDITED`.
 | Path | What it is | State |
 |---|---|---|
 | `app-common/` | Shared, toolkit-free material: the contract both app cores implement, the vectors, the view-model contract, the C++ transaction codec | `spec/` written; the rest arrives by task |
-| `app-core-rust/` | The Rust app core and the app's one Rust library: a crate exporting a C ABI and a flutter_rust_bridge surface. Features: `native-core` (default, the app core proper), `scaas` (`scaas-sdk`, `ua-rs`), `pqchat`, `pqvault` (the app cores, which depend on the SDK). The Flutter and Rust front-ends link it whole; Qt links it without `native-core` for Matrix, the SDK and the app cores (contract section 12) | not started |
+| `app-core-rust/` | The Rust app core and the app's one Rust library: a crate exporting a C ABI and a flutter_rust_bridge surface. Features: `native-core` (default, the app core proper), `scaas` (`scaas-sdk`, `ua-rs`), `pqchat`, `pqvault` (the app cores, which depend on the SDK). The Flutter and Rust front-ends link it whole; Qt links it whole (`SCAAS_QT_CORE=rust`) or without `native-core` beside `app-core-qt` (`cpp`, the default) (contract section 12) | not started |
 | `app-rust/` | The Rust front-end, built with Dioxus. It links `app-core-rust` as a crate (no C ABI hop; the `scaas` feature flows through). Desktop first; it renders through the system WebView, so text input uses the OS input method | not started |
 | `app-matrix/` | The Matrix crate, toolkit-free: one `matrix-rust-sdk` client and one login per app, Matrix's own end-to-end encryption, device verification. Every front-end uses it; in the `scaas` build `pqchat-core` sends its envelopes through the same client. Directory name proposed | not started |
 | `app-flutter/` | The Flutter front-end, the mobile front-end; it reaches `app-core-rust` through flutter_rust_bridge | not started |
@@ -27,7 +27,8 @@ The two ignored repositories are cloned into this directory by hand; this reposi
 [app-common/spec/app-core-contract.md](app-common/spec/app-core-contract.md): one vault format, one derivation-path
 table, one chain-to-backend table, one `derive` / `sign` interface, one endpoint-list rule, one set of error names. Both
 read the same rows of `app-common/vectors/`. CI cross-checks the two cores: the same mnemonic gives the same addresses,
-the same unsigned transaction gives the same signed bytes, and a vault written by one core opens in the other.
+the same unsigned transaction gives the same signed bytes, and a vault written by one core opens in the other. The Qt front-end runs on
+either core, one per binary (`SCAAS_QT_CORE`, contract section 12); Flutter and Dioxus run on `app-core-rust`.
 
 ## Who signs what
 
@@ -47,7 +48,8 @@ Variants are chosen by compile-time options only. Nothing is generated to drop f
 | `SCAAS_BACKEND_TWC` | CMake (`app-core-qt`) | `ON` | compiles the Trust Wallet Core backend, the default for native chains |
 | `SCAAS_BACKEND_TXCODEC_SHIP` | CMake (`app-core-qt`) | `OFF` | lets the chain table map a chain to the C++ codec in a release binary; test targets always compile the codec |
 | `SCAAS` | CMake (`app-core-qt`) | `OFF` | brings in `scaas-sdk` and `ua-rs` together, and with them every SCaaS feature including PqChat |
-| `native-core` | Cargo feature (`app-core-rust`) | on | the Rust app core proper; off only in the Rust library a Qt binary links |
+| `native-core` | Cargo feature (`app-core-rust`) | on | the Rust app core proper; off in the Rust library a Qt binary links with `SCAAS_QT_CORE=cpp` |
+| `SCAAS_QT_CORE` | CMake (Qt front-end; name proposed) | `cpp` | the Qt binary's one app core: `cpp` = `app-core-qt`, `rust` = `app-core-rust` through its C ABI |
 | `scaas` | Cargo feature (`app-core-rust`) | off | the same as `SCAAS` |
 | `SCAAS_PQCHAT`, `SCAAS_PQVAULT` | CMake (`app-core-qt`) | `ON` when `SCAAS` is `ON` | the app cores `pqchat-core` and `pqvault-core` (Cargo features `pqchat`, `pqvault`, each implying `scaas`); a `scaas` build may leave one out |
 
