@@ -10,8 +10,9 @@ on a file of the Status app. Plain C++17, Rust without a UI crate, JSON, Markdow
 | `viewmodel/` | The view-model contract: per screen, its models, actions, events and flow states, in toolkit-neutral terms | task B10 |
 | `txcodec/` | The C++ transaction codec and its C++ crypto, one copy for both cores (`app-core-rust` through `cxx`) | task B1b, after it is free of Qt |
 
-Task ids are those of the plan in the Qt repository,
-`scaas-qt-wallet-client/docs/superpowers/plans/2026-11-17-scaas-app-next.md`.
+Task ids: A, B and C are tasks of the plan in the Qt repository,
+`scaas-qt-wallet-client/docs/superpowers/plans/2026-11-17-scaas-app-next.md`; R, M, X and F are tasks of
+[docs/plans/2026-11-17-scaas-app-rust.md](../docs/plans/2026-11-17-scaas-app-rust.md).
 
 What goes where:
 

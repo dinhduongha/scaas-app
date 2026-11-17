@@ -21,6 +21,13 @@ this app uses or will use is `UNAUDITED`.
 
 The two ignored repositories are cloned into this directory by hand; this repository does not track them.
 
+## Plans
+
+- [docs/plans/2026-11-17-scaas-app-rust.md](docs/plans/2026-11-17-scaas-app-rust.md): `app-core-rust`, `app-matrix`, `app-rust`
+  (Dioxus) and `app-flutter` (groups R, M, X, F). PLANNED.
+- The Qt front-end and `app-core-qt` (groups A, B, C): `docs/superpowers/plans/2026-11-17-scaas-app-next.md` in the
+  `scaas-qt-wallet-client` repository.
+
 ## Two app cores, one contract
 
 `app-core-qt` (C++, in `scaas-qt-wallet-client/`) and `app-core-rust` (here) implement the same contract,
