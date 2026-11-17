@@ -2,4 +2,4 @@
 [formatting]
 reorder_keys = false
 reorder_arrays = false
-column_width = 120
+column_width = 100
